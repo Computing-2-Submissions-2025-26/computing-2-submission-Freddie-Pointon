@@ -1,9 +1,45 @@
-<!-- In HTML Comments are written like this -->
-<!-- They can all be removed for your apps -->
-<!doctype html> <!-- This first line tells browsers to expect modern standard html 5 -->
-<html lang="en-gb"> <!-- This is indicates the page is written in British English, useful for accessibility -->
-<meta charset="utf-8"> <!-- This indicates how the file is encoded. utf-8 is standard -->
-<title>Your Web-app Title</title> <!-- All pages need a title, this will be displayed in the browser's title bar -->
-<link rel="stylesheet" href="default.css"> <!-- Import style sheet – default.css -->
-<link rel="icon" href="./assets/favicon.png"> <!-- Import 'Favorites Icon' – favicon.png -->
-<script type="module" src="main.js"></script> <!-- Load the main script. Must be type="module". Have only one of these -->
+<!doctype html>
+<html lang="en-gb">
+<meta charset="utf-8">
+<title>Hex</title>
+<link rel="stylesheet" href="default.css">
+<script type="module" src="main.js"></script>
+ 
+<header>
+    <h1 id="title">Hex</h1>
+</header>
+ 
+<main tabindex="-1">
+    <!--
+        The board is generated entirely by main.js.
+        We give it an id so JS can find it.
+    -->
+    <div id="game_board" aria-label="Hex game board" role="grid"></div>
+</main>
+ 
+<!-- Left sidebar — Player 1 (Red, top–bottom) -->
+<aside id="player_1_panel" class="sidebar" aria-label="Player 1 info">
+    <div class="player_name">Player 1</div>
+    <div class="player_colour red_swatch" aria-label="Red"></div>
+    <div class="player_goal">Connects top ↕ bottom</div>
+    <div id="player_1_status" class="status_message" aria-live="polite">
+        Your turn
+    </div>
+</aside>
+ 
+<!-- Right sidebar — Player 2 (Blue, left–right) -->
+<aside id="player_2_panel" class="sidebar" aria-label="Player 2 info">
+    <div class="player_name">Player 2</div>
+    <div class="player_colour blue_swatch" aria-label="Blue"></div>
+    <div class="player_goal">Connects left ↔ right</div>
+    <div id="player_2_status" class="status_message" aria-live="polite">
+        Waiting…
+    </div>
+</aside>
+ 
+<!-- Game-over modal — <dialog> is the correct semantic element for this -->
+<dialog id="result_dialog" aria-label="Game over">
+    <h2 id="result_heading">Game Over</h2>
+    <p id="result_message"></p>
+    <button id="new_game_button" autofocus>Play Again</button>
+</dialog>

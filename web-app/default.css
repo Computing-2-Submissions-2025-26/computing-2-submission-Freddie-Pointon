@@ -1,0 +1,263 @@
+/* -------------------------------------------------------------------------
+   CSS custom properties — all magic numbers live here.
+   Changing --board-size here won't resize the JS-generated grid (JS reads
+   the size from the module), but it keeps visual sizing in one place.
+   ------------------------------------------------------------------------- */
+:root {
+    --banner-height: 70px;
+    --sidebar-width: 180px;
+    --border-width: 2px;
+
+    --cell-size: 48px;          /* Width of each hex cell image/div          */
+    --hex-row-offset: 24px;     /* Half cell-size — shifts each row right     */
+                                /* to produce the characteristic hex slant    */
+
+    /* Colours */
+    --bg-dark:          #2b1d0e;
+    --bg-board:         #c8a46e;   /* Warm wood tone                          */
+    --bg-board-edge-1:  #8b2020;   /* Red edge (Player 1 — top & bottom)      */
+    --bg-board-edge-2:  #1a3a6b;   /* Blue edge (Player 2 — left & right)     */
+    --banner-bg:        #1a0f05;
+    --banner-colour:    #e8c97a;
+    --sidebar-bg:       #3a2510;
+    --sidebar-colour:   #f0ddb0;
+    --border-colour:    #5c3a1a;
+    --cell-empty:       #deb887;
+    --cell-hover:       #f0c060;
+    --cell-p1:          #c0392b;   /* Red — Player 1                          */
+    --cell-p2:          #2471a3;   /* Blue — Player 2                         */
+    --cell-winning:     #f9e64f;   /* Gold highlight on winning path          */
+    --dialog-bg:        #2b1d0eee;
+    --dialog-colour:    #f0ddb0;
+    --button-bg:        #8b2020;
+    --button-hover:     #a03030;
+
+    font-family: Georgia, "Times New Roman", serif;
+}
+
+/* -------------------------------------------------------------------------
+   Reset / base
+   ------------------------------------------------------------------------- */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--bg-dark);
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    position: absolute;
+    width: 100%;
+}
+
+/* -------------------------------------------------------------------------
+   Header / banner
+   ------------------------------------------------------------------------- */
+header {
+    background: var(--banner-bg);
+    border-bottom: var(--border-width) solid var(--border-colour);
+    height: var(--banner-height);
+    position: absolute;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#title {
+    color: var(--banner-colour);
+    font-size: 2rem;
+    font-style: italic;
+    letter-spacing: 0.15em;
+    margin: 0;
+    text-shadow: 2px 2px 4px black;
+}
+
+/* -------------------------------------------------------------------------
+   Main play area
+   ------------------------------------------------------------------------- */
+main {
+    background: var(--bg-dark);
+    height: calc(100% - var(--banner-height));
+    left: var(--sidebar-width);
+    overflow: auto;
+    position: absolute;
+    top: var(--banner-height);
+    width: calc(100% - 2 * var(--sidebar-width));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* -------------------------------------------------------------------------
+   The game board wrapper
+   The board itself is a series of <div class="hex_row"> elements injected
+   by main.js. The offset-row staggering is done in JS by adding
+   margin-left per row.
+   ------------------------------------------------------------------------- */
+#game_board {
+    position: relative;
+    line-height: 0;
+    /* Coloured border strips represent the players' edges.
+       Top/bottom = Player 1 (red); left/right = Player 2 (blue).       */
+    border-top:    8px solid var(--bg-board-edge-1);
+    border-bottom: 8px solid var(--bg-board-edge-1);
+    border-left:   8px solid var(--bg-board-edge-2);
+    border-right:  8px solid var(--bg-board-edge-2);
+    background: var(--bg-board);
+    padding: 4px;
+}
+
+/* Each row of cells */
+.hex_row {
+    display: flex;
+    /* JS will set margin-left on each row to create the hex slant */
+}
+
+/* Individual hex cell */
+.hex_cell {
+    width: var(--cell-size);
+    height: var(--cell-size);
+    background: var(--cell-empty);
+    border: 1px solid var(--border-colour);
+    border-radius: 50%;         /* Circle approximates a hex for simplicity  */
+    cursor: pointer;
+    display: inline-block;
+    flex-shrink: 0;
+    margin: 2px;
+    outline: none;
+    transition: background 0.1s;
+    /* Accessibility: cells are focusable */
+}
+
+.hex_cell:hover,
+.hex_cell:focus {
+    background: var(--cell-hover);
+}
+
+/* Once a token is placed, the cell is no longer interactive */
+.hex_cell.occupied {
+    cursor: default;
+    pointer-events: none;
+}
+
+.hex_cell.player_1 {
+    background: var(--cell-p1);
+    border-color: #7b1818;
+}
+
+.hex_cell.player_2 {
+    background: var(--cell-p2);
+    border-color: #123456;
+}
+
+/* Highlight the winning path */
+.hex_cell.winning {
+    background: var(--cell-winning);
+    border-color: #b8860b;
+    box-shadow: 0 0 8px 2px var(--cell-winning);
+}
+
+/* -------------------------------------------------------------------------
+   Sidebars
+   ------------------------------------------------------------------------- */
+.sidebar {
+    background: var(--sidebar-bg);
+    border: var(--border-width) solid var(--border-colour);
+    color: var(--sidebar-colour);
+    height: calc(100% - var(--banner-height));
+    padding: 1.5rem 1rem;
+    position: absolute;
+    text-align: center;
+    top: var(--banner-height);
+    width: var(--sidebar-width);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+#player_1_panel { left: 0; }
+#player_2_panel { right: 0; }
+
+.player_name {
+    font-size: 1.1rem;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+}
+
+.player_colour {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid var(--border-colour);
+}
+
+.red_swatch  { background: var(--cell-p1); }
+.blue_swatch { background: var(--cell-p2); }
+
+.player_goal {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    line-height: 1.4;
+}
+
+.status_message {
+    font-size: 0.95rem;
+    font-weight: bold;
+    margin-top: auto;
+    padding: 0.5rem;
+    border-radius: 4px;
+    width: 100%;
+}
+
+.status_message.active {
+    background: rgba(255, 255, 255, 0.15);
+    color: var(--banner-colour);
+}
+
+/* -------------------------------------------------------------------------
+   Result dialog
+   ------------------------------------------------------------------------- */
+#result_dialog {
+    background: var(--dialog-bg);
+    border: 2px solid var(--border-colour);
+    border-radius: 8px;
+    color: var(--dialog-colour);
+    padding: 2rem 3rem;
+    text-align: center;
+    min-width: 300px;
+}
+
+#result_dialog::backdrop {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+#result_heading {
+    color: var(--banner-colour);
+    font-size: 2rem;
+    margin: 0 0 0.5rem;
+}
+
+#result_message {
+    font-size: 1.1rem;
+    margin-bottom: 1.5rem;
+}
+
+#new_game_button {
+    background: var(--button-bg);
+    border: none;
+    border-radius: 4px;
+    color: var(--dialog-colour);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 1rem;
+    padding: 0.6rem 1.8rem;
+}
+
+#new_game_button:hover,
+#new_game_button:focus {
+    background: var(--button-hover);
+    outline: 2px solid var(--banner-colour);
+}
