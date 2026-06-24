@@ -215,7 +215,7 @@ const redraw = function () {
             cell.className = "hex_cell";
             label.textContent = "";
 
-            // Stones and their colour-blind-safe letters.
+            // Place the player's stone on owned cells.
             if (token === 1) {
                 cell.classList.add("player_1");
             }
@@ -373,7 +373,7 @@ const move_focus = function (row, col, key) {
 // boundary cells, so the colour marks the board edge rather than tinting whole
 // cells. Each of a hex cell's six edges faces one neighbour direction; an edge
 // is on the boundary when that neighbour is off the board. Top and bottom
-// edges belong to Player 1 (red); left and right to Player 2 (blue). The two
+// edges belong to Player 1 (gold); left and right to Player 2 (black). The two
 // diagonal edges sit at the corners, where the colours meet — which is honest,
 // since a corner can complete either player's connection.
 //

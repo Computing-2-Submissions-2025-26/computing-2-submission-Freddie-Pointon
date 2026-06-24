@@ -211,6 +211,7 @@ const hex_directions = [
 /**
  * Returns a function that shifts an offset by a fixed starting position.
  * @function
+ * @private
  * @param {Hex.Position} position The position to shift from.
  * @returns {function} A function mapping an offset to a new position.
  */
@@ -254,6 +255,7 @@ Hex.neighbours = function (size, position) {
 /**
  * Encodes a position as a "row,col" string for use as a Set/Map key.
  * @function
+ * @private
  * @param {Hex.Position} position The position to encode.
  * @returns {string} The string key.
  */
@@ -265,6 +267,7 @@ const key_of = function ([row, col]) {
  * Returns the top-edge cells owned by a player: the starting points for a
  * top-to-bottom search.
  * @function
+ * @private
  * @param {Hex.Player} player The player to seed for.
  * @param {Hex.Board} board The board to read.
  * @returns {Hex.Position[]} The owned cells on row 0.
@@ -289,6 +292,7 @@ const top_edge_seeds = function (player, board) {
  * They are never exposed and the board is never changed, so the function is
  * pure: the same board always yields the same path.
  * @function
+ * @private
  * @param {Hex.Player} player The player whose stones form the path.
  * @param {Hex.Board} board The board to search.
  * @returns {Hex.Position[]} A connecting path, or [] if none exists.
@@ -456,6 +460,7 @@ Hex.place_stone = function (player, [row, col], game) {
 /**
  * Finds the single stone on a board that has had exactly one move played.
  * @function
+ * @private
  * @param {Hex.Board} board The board to scan.
  * @returns {Hex.Position} The position of the only stone.
  */

@@ -89,7 +89,7 @@ header {
     width: 100%;
 }
 
-/* A faint honeycomb motif gives the banner some character. */
+/* A faint honeycomb graphic gives the banner some character. */
 header::before {
     background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27440%27%20height%3D%2772%27%20viewBox%3D%270%200%20440%2072%27%3E%3Cpolygon%20points%3D%2740.0%2C4.0%2053.9%2C12.0%2053.9%2C28.0%2040.0%2C36.0%2026.1%2C28.0%2026.1%2C12.0%27%20fill%3D%27%23f5c518%27%20fill-opacity%3D%270.1%27%2F%3E%3Cpolygon%20points%3D%2795.0%2C41.0%20104.5%2C46.5%20104.5%2C57.5%2095.0%2C63.0%2085.5%2C57.5%2085.5%2C46.5%27%20fill%3D%27none%27%20stroke%3D%27%23f5c518%27%20stroke-opacity%3D%270.3%27%20stroke-width%3D%272%27%2F%3E%3Cpolygon%20points%3D%27150.0%2C-4.0%20167.3%2C6.0%20167.3%2C26.0%20150.0%2C36.0%20132.7%2C26.0%20132.7%2C6.0%27%20fill%3D%27none%27%20stroke%3D%27%23f5c518%27%20stroke-opacity%3D%270.3%27%20stroke-width%3D%272%27%2F%3E%3Cpolygon%20points%3D%27210.0%2C31.0%20221.3%2C37.5%20221.3%2C50.5%20210.0%2C57.0%20198.7%2C50.5%20198.7%2C37.5%27%20fill%3D%27%23f5c518%27%20fill-opacity%3D%270.08%27%2F%3E%3Cpolygon%20points%3D%27262.0%2C12.0%20270.7%2C17.0%20270.7%2C27.0%20262.0%2C32.0%20253.3%2C27.0%20253.3%2C17.0%27%20fill%3D%27%23f5c518%27%20fill-opacity%3D%270.12%27%2F%3E%3Cpolygon%20points%3D%27315.0%2C33.0%20329.7%2C41.5%20329.7%2C58.5%20315.0%2C67.0%20300.3%2C58.5%20300.3%2C41.5%27%20fill%3D%27none%27%20stroke%3D%27%23f5c518%27%20stroke-opacity%3D%270.28%27%20stroke-width%3D%272%27%2F%3E%3Cpolygon%20points%3D%27360.0%2C6.0%20370.4%2C12.0%20370.4%2C24.0%20360.0%2C30.0%20349.6%2C24.0%20349.6%2C12.0%27%20fill%3D%27%23f5c518%27%20fill-opacity%3D%270.1%27%2F%3E%3Cpolygon%20points%3D%27410.0%2C31.0%20423.0%2C38.5%20423.0%2C53.5%20410.0%2C61.0%20397.0%2C53.5%20397.0%2C38.5%27%20fill%3D%27none%27%20stroke%3D%27%23f5c518%27%20stroke-opacity%3D%270.26%27%20stroke-width%3D%272%27%2F%3E%3C%2Fsvg%3E");
     background-position: center;
@@ -600,7 +600,7 @@ main:focus {
 
 /* Active player's sidebar lights up. The lift in brightness + the inset ring
    mark the active panel by more than colour alone; combined with the panel's
-   position (left = P1) and its R/B label, the turn is clear without relying on
+   position (left = P1) and its name label, the turn is clear without relying on
    hue, which keeps it readable for colour-blind players. */
 .sidebar.turn {
     background: #2f3c4a;

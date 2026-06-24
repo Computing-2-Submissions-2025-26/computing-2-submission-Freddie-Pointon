@@ -30,6 +30,18 @@ const board_with = function (size, token, positions) {
     );
 };
 
+// True when every consecutive pair in `path` is adjacent on a board of the
+// given size — i.e. the path is a genuine connected chain of cells, not just
+// cells drawn from the right rows. Verifies winning_path returns a real route.
+const is_connected_chain = function (size, path) {
+    const pairs = R.aperture(2, path);
+    const is_adjacent_pair = function ([from, to]) {
+        return R.any(R.equals(to), Hex.neighbours(size, from));
+    };
+    return R.all(is_adjacent_pair, pairs);
+};
+
+
 // ---------------------------------------------------------------------------
 // Validity oracle.
 // A board is valid when:
@@ -63,7 +75,7 @@ const throw_if_invalid = function (board) {
     const only_valid_cells = R.pipe(
         R.flatten,
         R.all(function (cell) {
-            return [0, 1, 2].includes(cell);
+            return R.includes(cell, [0, 1, 2]);
         })
     )(board);
     if (!only_valid_cells) {
@@ -443,6 +455,12 @@ Then Player 1 is the winner and the winning path spans every row.`,
                     + JSON.stringify(path)
                 );
             }
+            if (!is_connected_chain(size, path)) {
+                throw new Error(
+                    "Winning path is not a connected chain: "
+                    + JSON.stringify(path)
+                );
+            }
         }
     );
 
@@ -507,6 +525,12 @@ Then Player 2 is the winner and the winning path spans every column.`,
             if (!spans) {
                 throw new Error(
                     "Winning path should span left to right: "
+                    + JSON.stringify(path)
+                );
+            }
+            if (!is_connected_chain(size, path)) {
+                throw new Error(
+                    "Winning path is not a connected chain: "
                     + JSON.stringify(path)
                 );
             }
