@@ -1,233 +1,589 @@
 /*jslint browser */
-// main.js is the UI layer only.
-// It calls Hex.js for all game logic — no game rules live here.
-
 import R from "./ramda.js";
 import Hex from "./Hex.js";
 
+// main.js is the user-interface layer. All game rules live in Hex.js; this
+// file only reads game state, draws it, and turns user events into calls on
+// the module.
+
 // ---------------------------------------------------------------------------
-// Constants — display strings and UI config
+// Fixed page elements
 // ---------------------------------------------------------------------------
 
-const PLAYER_NAMES = {1: "Player 1 (Red)", 2: "Player 2 (Blue)"};
+const game_board_el = document.getElementById("game_board");
+const turn_status_el = document.getElementById("turn_status");
+const player_1_panel_el = document.getElementById("player_1_panel");
+const player_2_panel_el = document.getElementById("player_2_panel");
+const player_1_cue_el = document.getElementById("player_1_cue");
+const player_2_cue_el = document.getElementById("player_2_cue");
+const player_1_name_el = document.getElementById("player_1_name");
+const player_2_name_el = document.getElementById("player_2_name");
+const size_select_el = document.getElementById("board_size");
+const restart_el = document.getElementById("restart");
+const undo_el = document.getElementById("undo");
+const confirm_dialog_el = document.getElementById("confirm_dialog");
+const confirm_start_el = document.getElementById("confirm_start");
+const confirm_cancel_el = document.getElementById("confirm_cancel");
+const player_1_won_el = document.getElementById("player_1_won");
+const player_1_lost_el = document.getElementById("player_1_lost");
+const player_2_won_el = document.getElementById("player_2_won");
+const player_2_lost_el = document.getElementById("player_2_lost");
+const player_1_record_size_el = document.getElementById("player_1_record_size");
+const player_2_record_size_el = document.getElementById("player_2_record_size");
 
-const STATUS = {
-    active:  "Your turn",
-    waiting: "Waiting…",
-    won:     "Winner! 🎉",
-    lost:    "Better luck next time"
+// ---------------------------------------------------------------------------
+// Mutable state — only this layer touches it
+// ---------------------------------------------------------------------------
+
+let game = Hex.new_game(9);
+let cell_els = [];      // cell_els[row][col] holds each cell's <div>.
+let history = [];       // previous game states, for undo.
+let pending_size;       // board size awaiting confirmation.
+let win_recorded = false;   // has this game's result been tallied?
+let audio_context;          // created lazily on the first move (a gesture).
+
+// ---------------------------------------------------------------------------
+// Sound — short synthesised cues, so no audio files need shipping. The audio
+// context is created lazily on the first move (a user gesture), which is what
+// browsers require before they will play sound.
+// ---------------------------------------------------------------------------
+
+const get_audio = function () {
+    if (window.AudioContext === undefined) {
+        return undefined;
+    }
+    if (audio_context === undefined) {
+        audio_context = new window.AudioContext();
+    }
+    if (audio_context.state === "suspended") {
+        audio_context.resume();
+    }
+    return audio_context;
+};
+
+// Plays one tone with a quick fade in and out, so it sounds like a soft blip
+// rather than a hard click or a sustained beep.
+const play_tone = function (frequency, start_offset, duration, peak, wave) {
+    const context = get_audio();
+    if (context === undefined) {
+        return;
+    }
+    const oscillator = context.createOscillator();
+    const envelope = context.createGain();
+    const start_at = context.currentTime + start_offset;
+    const end_at = start_at + duration;
+    oscillator.type = wave;
+    oscillator.frequency.value = frequency;
+    envelope.gain.setValueAtTime(0.0001, start_at);
+    envelope.gain.exponentialRampToValueAtTime(peak, start_at + 0.012);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, end_at);
+    oscillator.connect(envelope);
+    envelope.connect(context.destination);
+    oscillator.start(start_at);
+    oscillator.stop(end_at + 0.02);
+};
+
+// A soft tap when a stone is placed.
+const play_tap = function () {
+    play_tone(330, 0, 0.08, 0.16, "triangle");
+};
+
+// A short rising arpeggio when the game is won.
+const play_victory = function () {
+    play_tone(523.25, 0, 0.16, 0.16, "sine");
+    play_tone(659.25, 0.12, 0.16, 0.16, "sine");
+    play_tone(783.99, 0.24, 0.16, 0.16, "sine");
+    play_tone(1046.5, 0.36, 0.34, 0.18, "sine");
 };
 
 // ---------------------------------------------------------------------------
-// Module-level state
-// All mutable state lives here — only main.js touches it.
+// Small display helpers
 // ---------------------------------------------------------------------------
 
-let board = Hex.empty_board(11);
+const colour_word = function (player) {
+    return (
+        player === 1
+        ? "Gold"
+        : "Black"
+    );
+};
+
+const player_name = function (player) {
+    const field = (
+        player === 1
+        ? player_1_name_el
+        : player_2_name_el
+    );
+    const typed = field.value.trim();
+    const label = (
+        typed === ""
+        ? "Player " + player
+        : typed
+    );
+    return label + " (" + colour_word(player) + ")";
+};
+
+const position_key = function ([row, col]) {
+    return `${row},${col}`;
+};
+
+// Win tallies kept per board size, so the record on screen always matches the
+// size being played. Keyed by the size as a string (a plain object with
+// numeric keys is a JSLint error), via Object.create(null) so there are no
+// inherited keys to trip over.
+const win_counts = Object.create(null);
+
+const counts_for = function (size) {
+    const key = String(size);
+    if (win_counts[key] === undefined) {
+        win_counts[key] = {"player_1": 0, "player_2": 0};
+    }
+    return win_counts[key];
+};
+
+// delta is +1 to record a win, -1 to take one back (used by undo).
+const record_win = function (size, player, delta) {
+    const counts = counts_for(size);
+    if (player === 1) {
+        counts.player_1 += delta;
+    } else {
+        counts.player_2 += delta;
+    }
+};
+
+// One player's wins are the other's losses, so both columns come from the same
+// pair of tallies.
+const render_stats = function (size) {
+    const counts = counts_for(size);
+    const label = size + " \u00d7 " + size;
+    player_1_record_size_el.textContent = label;
+    player_2_record_size_el.textContent = label;
+    player_1_won_el.textContent = String(counts.player_1);
+    player_1_lost_el.textContent = String(counts.player_2);
+    player_2_won_el.textContent = String(counts.player_2);
+    player_2_lost_el.textContent = String(counts.player_1);
+};
+
+// While a swap is available there is exactly one stone on the board; this
+// finds it so its cell can be marked. This only reads state for display —
+// the swap rule itself lives in Hex.swap.
+const swappable_position = function () {
+    const size = Hex.size(game.board);
+    let found;
+    R.range(0, size).forEach(function (row) {
+        R.range(0, size).forEach(function (col) {
+            if (game.board[row][col] !== 0) {
+                found = [row, col];
+            }
+        });
+    });
+    return found;
+};
 
 // ---------------------------------------------------------------------------
-// DOM references — resolved once at startup
+// Redraw — the single place that maps game state onto the DOM
 // ---------------------------------------------------------------------------
 
-const game_board_el    = document.getElementById("game_board");
-const result_dialog    = document.getElementById("result_dialog");
-const result_message   = document.getElementById("result_message");
-const new_game_button  = document.getElementById("new_game_button");
-const p1_status        = document.getElementById("player_1_status");
-const p2_status        = document.getElementById("player_2_status");
+const redraw = function () {
+    const size = Hex.size(game.board);
+    const won = Hex.is_won(game.board);
+    const winning_player = Hex.winner(game.board);
+    const current_player = Hex.player_to_move(game);
+    const can_swap = Hex.can_swap(game);
+
+    const winning_keys = new Set(
+        Hex.winning_path(game.board).map(position_key)
+    );
+    const swap_target = (
+        can_swap
+        ? swappable_position()
+        : undefined
+    );
+    const swap_key = (
+        swap_target === undefined
+        ? ""
+        : position_key(swap_target)
+    );
+
+    R.range(0, size).forEach(function (row) {
+        R.range(0, size).forEach(function (col) {
+            const cell = cell_els[row][col];
+            const label = cell.firstElementChild;
+            const token = game.board[row][col];
+            const key = position_key([row, col]);
+
+            cell.className = "hex_cell";
+            label.textContent = "";
+
+            // Stones and their colour-blind-safe letters.
+            if (token === 1) {
+                cell.classList.add("player_1");
+            }
+            if (token === 2) {
+                cell.classList.add("player_2");
+            }
+
+            if (won && winning_keys.has(key)) {
+                cell.classList.add("winning");
+            }
+
+            const is_swap_target = key === swap_key;
+            if (is_swap_target) {
+                cell.classList.add("swappable");
+            }
+
+            // A cell is reachable by keyboard when it is a legal target:
+            // an empty cell mid-game, or the swappable opening stone.
+            const is_playable = (!won && token === 0) || is_swap_target;
+            cell.tabIndex = (
+                is_playable
+                ? 0
+                : -1
+            );
+            cell.setAttribute(
+                "aria-label",
+                `Row ${row + 1}, column ${col + 1}: ` + (
+                    token === 0
+                    ? "empty"
+                    : player_name(token)
+                )
+            );
+        });
+    });
+
+    // Whose turn it is, shown by lighting up that player's sidebar.
+    player_1_panel_el.classList.toggle("turn", !won && current_player === 1);
+    player_2_panel_el.classList.toggle("turn", !won && current_player === 2);
+
+    // Opening cues inside the glowing banner: an instruction for the very
+    // first move, then the swap option on move two. After that, the glow alone
+    // signals the turn and no banner text is shown.
+    const cue_for = function (player) {
+        if (won || current_player !== player) {
+            return "";
+        }
+        if (game.moves_played === 0) {
+            return colour_word(player) + " to start — place a stone.";
+        }
+        if (can_swap) {
+            return "Place a stone, or click the marked stone to swap.";
+        }
+        return "";
+    };
+    player_1_cue_el.textContent = cue_for(1);
+    player_2_cue_el.textContent = cue_for(2);
+
+    // The middle line shows the result on screen. During play it is hidden,
+    // but still announces the turn and swap option to screen readers.
+    if (won) {
+        turn_status_el.textContent = player_name(winning_player) + " wins!";
+        turn_status_el.classList.remove("sr_only");
+        turn_status_el.classList.add("win");
+        turn_status_el.classList.toggle("win_p1", winning_player === 1);
+        turn_status_el.classList.toggle("win_p2", winning_player === 2);
+    } else {
+        const turn_line = player_name(current_player) + "'s turn.";
+        turn_status_el.textContent = (
+            can_swap
+            ? turn_line + " Click the marked stone to swap, or play."
+            : turn_line
+        );
+        turn_status_el.classList.add("sr_only");
+        turn_status_el.classList.remove("win");
+        turn_status_el.classList.remove("win_p1");
+        turn_status_el.classList.remove("win_p2");
+    }
+
+    // Tally the result the first time the game is won, then mirror the record
+    // for the size in play into both sidebars.
+    if (won && !win_recorded) {
+        record_win(size, winning_player, 1);
+        win_recorded = true;
+    }
+    render_stats(size);
+
+    undo_el.disabled = history.length === 0;
+    if (won) {
+        restart_el.classList.add("attention");
+    } else {
+        restart_el.classList.remove("attention");
+    }
+};
 
 // ---------------------------------------------------------------------------
-// Board generation
-// We build all cell elements once and store references in a 2-D array
-// (cell_els[row][col]) so redraw() can update them without querying the DOM.
+// Acting on a cell — click or keyboard
 // ---------------------------------------------------------------------------
 
-/**
- * Builds the grid of cell elements and appends them to #game_board.
- * Returns a 2-D array of the created elements for use by redraw().
- * @param {number} size The board size.
- * @returns {HTMLElement[][]} 2-D array of cell div elements.
- */
-const build_board_elements = function (size) {
+const activate_cell = function (row, col) {
+    if (Hex.is_won(game.board)) {
+        return;
+    }
+    // Clicking the lone opening stone while a swap is offered performs the
+    // swap; anything else is a normal placement.
+    const next = (
+        (Hex.can_swap(game) && game.board[row][col] !== 0)
+        ? Hex.swap(game)
+        : Hex.place_stone(Hex.player_to_move(game), [row, col], game)
+    );
+    if (next === undefined) {
+        return;
+    }
+    history.push(game);
+    game = next;
+    if (Hex.is_won(game.board)) {
+        play_victory();
+    } else {
+        play_tap();
+    }
+    redraw();
+};
+
+// Steps back to the previous game state. Because each move pushed the whole
+// prior state, this also reverses a swap.
+const undo = function () {
+    if (history.length === 0) {
+        return;
+    }
+    if (win_recorded && Hex.is_won(game.board)) {
+        record_win(Hex.size(game.board), Hex.winner(game.board), -1);
+        win_recorded = false;
+    }
+    game = history.pop();
+    redraw();
+};
+
+const move_focus = function (row, col, key) {
+    const size = Hex.size(game.board);
+    const moves = {
+        "ArrowDown": [row + 1, col],
+        "ArrowLeft": [row, col - 1],
+        "ArrowRight": [row, col + 1],
+        "ArrowUp": [row - 1, col]
+    };
+    const target = moves[key];
+    if (target !== undefined && Hex.is_on_board(size, target)) {
+        cell_els[target[0]][target[1]].focus();
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Board-boundary stroke
+//
+// We draw a thick coloured line along only the outward-facing edges of the
+// boundary cells, so the colour marks the board edge rather than tinting whole
+// cells. Each of a hex cell's six edges faces one neighbour direction; an edge
+// is on the boundary when that neighbour is off the board. Top and bottom
+// edges belong to Player 1 (red); left and right to Player 2 (blue). The two
+// diagonal edges sit at the corners, where the colours meet — which is honest,
+// since a corner can complete either player's connection.
+//
+// Coordinates come from each cell's rendered position, so the overlay always
+// lines up with the cells regardless of size or scaling.
+// ---------------------------------------------------------------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+const hex_edges = [
+    {"from": "UL", "side": "p1", "step": [-1, 0], "to": "T"},
+    {"from": "T", "side": "ne", "step": [-1, 1], "to": "UR"},
+    {"from": "UR", "side": "p2", "step": [0, 1], "to": "LR"},
+    {"from": "LR", "side": "p1", "step": [1, 0], "to": "B"},
+    {"from": "B", "side": "sw", "step": [1, -1], "to": "LL"},
+    {"from": "LL", "side": "p2", "step": [0, -1], "to": "UL"}
+];
+
+const edge_colour_class = function (side, row, size) {
+    if (side === "p1") {
+        return "edge_red";
+    }
+    if (side === "p2") {
+        return "edge_blue";
+    }
+    if (side === "ne") {
+        return (
+            row === 0
+            ? "edge_red"
+            : "edge_blue"
+        );
+    }
+    // "sw"
+    return (
+        row === size - 1
+        ? "edge_red"
+        : "edge_blue"
+    );
+};
+
+// The six hexagon vertices for a cell occupying the rectangle (x, y, w, h).
+const hex_vertices = function (x, y, w, h) {
+    return {
+        "B": [x + w / 2, y + h],
+        "LL": [x, y + h * 0.75],
+        "LR": [x + w, y + h * 0.75],
+        "T": [x + w / 2, y],
+        "UL": [x, y + h * 0.25],
+        "UR": [x + w, y + h * 0.25]
+    };
+};
+
+const make_edge_line = function (from_point, to_point, colour_class) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", from_point[0]);
+    line.setAttribute("y1", from_point[1]);
+    line.setAttribute("x2", to_point[0]);
+    line.setAttribute("y2", to_point[1]);
+    line.setAttribute("class", "edge_line " + colour_class);
+    return line;
+};
+
+const draw_board_edges = function (size) {
+    const board_rect = game_board_el.getBoundingClientRect();
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "board_edges");
+    svg.setAttribute("width", board_rect.width);
+    svg.setAttribute("height", board_rect.height);
+    svg.setAttribute("aria-hidden", "true");
+
+    R.range(0, size).forEach(function (row) {
+        R.range(0, size).forEach(function (col) {
+            const rect = cell_els[row][col].getBoundingClientRect();
+            const vertex = hex_vertices(
+                rect.left - board_rect.left,
+                rect.top - board_rect.top,
+                rect.width,
+                rect.height
+            );
+            hex_edges.forEach(function (edge) {
+                const n_row = row + edge.step[0];
+                const n_col = col + edge.step[1];
+                const off_board = (
+                    n_row < 0 || n_row >= size
+                    || n_col < 0 || n_col >= size
+                );
+                if (off_board) {
+                    svg.append(make_edge_line(
+                        vertex[edge.from],
+                        vertex[edge.to],
+                        edge_colour_class(edge.side, row, size)
+                    ));
+                }
+            });
+        });
+    });
+    game_board_el.append(svg);
+};
+
+// ---------------------------------------------------------------------------
+// Building the board elements
+// ---------------------------------------------------------------------------
+
+const build_board = function (size) {
     game_board_el.innerHTML = "";
-
-    return R.range(0, size).map(function (row) {
-        const row_div = document.createElement("div");
-        row_div.className = "hex_row";
-        // Each row is offset right by half a cell to create the hex slant.
-        // Row 0 has no offset; row 1 has half a cell; row n has n * half.
-        row_div.style.marginLeft = `${row * 24}px`;
-        game_board_el.append(row_div);
+    cell_els = R.range(0, size).map(function (row) {
+        const row_el = document.createElement("div");
+        row_el.className = "hex_row";
+        row_el.setAttribute("role", "row");
+        // The stylesheet reads --row to stagger the row into the rhombus.
+        row_el.style.setProperty("--row", row);
+        game_board_el.append(row_el);
 
         return R.range(0, size).map(function (col) {
             const cell = document.createElement("div");
             cell.className = "hex_cell";
-            // tabIndex=0 makes the cell keyboard-focusable (accessibility).
-            cell.tabIndex = 0;
             cell.setAttribute("role", "gridcell");
-            cell.setAttribute("aria-label", `Row ${row + 1}, Column ${col + 1}`);
 
-            // Click handler — delegates to handle_move.
+            const label = document.createElement("span");
+            label.className = "label";
+            cell.append(label);
+
             cell.onclick = function () {
-                handle_move(row, col);
+                activate_cell(row, col);
             };
-
-            // Keyboard handler — Enter/Space to place, arrows to navigate.
             cell.onkeydown = function (event) {
                 if (event.key === "Enter" || event.key === " ") {
-                    handle_move(row, col);
-                }
-                if (event.key === "ArrowRight" && col < size - 1) {
-                    cell_els[row][col + 1].focus();
-                }
-                if (event.key === "ArrowLeft" && col > 0) {
-                    cell_els[row][col - 1].focus();
-                }
-                if (event.key === "ArrowDown" && row < size - 1) {
-                    cell_els[row + 1][col].focus();
-                }
-                if (event.key === "ArrowUp" && row > 0) {
-                    cell_els[row - 1][col].focus();
+                    event.preventDefault();
+                    activate_cell(row, col);
+                } else {
+                    move_focus(row, col, event.key);
                 }
             };
 
-            row_div.append(cell);
+            row_el.append(cell);
             return cell;
         });
     });
-};
-
-const cell_els = build_board_elements(Hex.size(board));
-
-// ---------------------------------------------------------------------------
-// Redraw — the single function that maps game state → DOM
-// This is the key architectural pattern from the exemplar:
-// state changes happen in Hex.js, then we call redraw() to sync the UI.
-// ---------------------------------------------------------------------------
-
-/**
- * Reads the current board state and updates every DOM element to match.
- * This is the only place that writes to the DOM (other than build_board_elements).
- */
-const redraw = function () {
-    const size = Hex.size(board);
-    const current_player = Hex.player_to_move(board);
-    const ended = Hex.is_ended(board);
-    const winning_player = Hex.winner(board);
-
-    // Update each cell's CSS class to reflect its state.
-    R.range(0, size).forEach(function (row) {
-        R.range(0, size).forEach(function (col) {
-            const cell = cell_els[row][col];
-            const token = board[row][col];
-
-            // Reset all state classes, then apply the current one.
-            cell.className = "hex_cell";
-            if (token === 1) {
-                cell.classList.add("player_1", "occupied");
-                cell.setAttribute("aria-label", `Row ${row + 1}, Col ${col + 1} — Red`);
-            } else if (token === 2) {
-                cell.classList.add("player_2", "occupied");
-                cell.setAttribute("aria-label", `Row ${row + 1}, Col ${col + 1} — Blue`);
-            }
-            // Remove keyboard focus from occupied cells — they can't be clicked.
-            cell.tabIndex = (token === 0 && !ended) ? 0 : -1;
-        });
-    });
-
-    // Update sidebar status messages.
-    if (ended) {
-        p1_status.textContent = (winning_player === 1) ? STATUS.won : STATUS.lost;
-        p2_status.textContent = (winning_player === 2) ? STATUS.won : STATUS.lost;
-        p1_status.className = "status_message";
-        p2_status.className = "status_message";
-    } else {
-        p1_status.textContent = (current_player === 1) ? STATUS.active : STATUS.waiting;
-        p2_status.textContent = (current_player === 2) ? STATUS.active : STATUS.waiting;
-        p1_status.className = (current_player === 1)
-            ? "status_message active"
-            : "status_message";
-        p2_status.className = (current_player === 2)
-            ? "status_message active"
-            : "status_message";
-    }
+    draw_board_edges(size);
 };
 
 // ---------------------------------------------------------------------------
-// Move handler
+// Starting and restarting games
 // ---------------------------------------------------------------------------
 
-/**
- * Attempts to place the current player's token at [row, col].
- * If the move is legal, updates the board state and redraws.
- * If the game is now over, shows the result dialog.
- * @param {number} row
- * @param {number} col
- */
-const handle_move = function (row, col) {
-    if (Hex.is_ended(board)) {
-        return;
-    }
-    const player = Hex.player_to_move(board);
-    const next_board = Hex.place_token(player, [row, col], board);
+// The opening move is given to a random player each game, so neither colour
+// always starts. The randomness lives here in the UI; Hex.new_game stays pure.
+const random_first_player = function () {
+    return (
+        Math.random() < 0.5
+        ? 1
+        : 2
+    );
+};
 
-    // place_token returns undefined for illegal moves — silently ignore.
-    if (next_board === undefined) {
-        return;
-    }
-
-    board = next_board;
+const start_new_game = function (size) {
+    game = Hex.new_game(size, random_first_player());
+    history = [];
+    win_recorded = false;
+    build_board(size);
     redraw();
-
-    if (Hex.is_ended(board)) {
-        const winning_player = Hex.winner(board);
-        result_message.textContent = (
-            `${PLAYER_NAMES[winning_player]} wins! ` +
-            (winning_player === 1
-                ? "A path from top to bottom has been formed."
-                : "A path from left to right has been formed.")
-        );
-        result_dialog.showModal();
-    }
 };
 
-// ---------------------------------------------------------------------------
-// New game
-// ---------------------------------------------------------------------------
-
-/**
- * Resets the board to a fresh state and rebuilds the DOM.
- */
-const start_new_game = function () {
-    board = Hex.empty_board(11);
-    // Rebuild the board elements (handles any size change if we extend later).
-    build_board_elements(Hex.size(board));
-    // Re-populate cell_els by reassigning each row/col reference.
-    const size = Hex.size(board);
-    R.range(0, size).forEach(function (row) {
-        R.range(0, size).forEach(function (col) {
-            cell_els[row][col] = (
-                game_board_el.children[row].children[col]
-            );
-        });
-    });
-    redraw();
-    result_dialog.close();
-    // Return focus to the top-left cell.
+// Returns keyboard focus to the board after a player-triggered new game.
+const focus_board = function () {
     cell_els[0][0].focus();
 };
 
-new_game_button.onclick = start_new_game;
-new_game_button.onkeydown = function (event) {
-    if (event.key === "Enter" || event.key === " ") {
-        start_new_game();
+// Starts a new game, but checks first if a game is in progress so the player
+// is not caught out by an accidental restart or size change.
+const request_new_game = function (size) {
+    const in_progress = game.moves_played > 0 && !Hex.is_won(game.board);
+    if (in_progress) {
+        pending_size = size;
+        confirm_dialog_el.showModal();
+    } else {
+        start_new_game(size);
+        focus_board();
     }
 };
 
 // ---------------------------------------------------------------------------
-// Startup
+// Wiring up controls
 // ---------------------------------------------------------------------------
 
-redraw();
-cell_els[0][0].focus();
+undo_el.onclick = undo;
+player_1_name_el.oninput = redraw;
+player_2_name_el.oninput = redraw;
 
+// The board changes only when New game is clicked, using the selected size.
+restart_el.onclick = function () {
+    request_new_game(Number(size_select_el.value));
+};
+
+confirm_start_el.onclick = function () {
+    confirm_dialog_el.close();
+    start_new_game(pending_size);
+    focus_board();
+};
+
+// Cancelling (button or Escape) just keeps the current game.
+const cancel_new_game = function () {
+    confirm_dialog_el.close();
+};
+
+confirm_cancel_el.onclick = cancel_new_game;
+confirm_dialog_el.oncancel = cancel_new_game;
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+
+start_new_game(Number(size_select_el.value));

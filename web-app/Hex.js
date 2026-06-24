@@ -4,14 +4,26 @@ import R from "./ramda.js";
  * Hex.js models and plays the board game Hex.
  * https://en.wikipedia.org/wiki/Hex_(board_game)
  *
- * The board is a rhombus-shaped grid of hexagonal cells.
- * Player 1 (Red)  wins by forming a connected path from the top edge
- * to the bottom edge.
- * Player 2 (Blue) wins by forming a connected path from the left edge
- * to the right edge.
+ * Hex is played on a rhombus of hexagonal cells. Two players take turns
+ * placing a stone of their colour on an empty cell.
+ * - Player 1 wins by connecting the top edge to the bottom edge.
+ * - Player 2 wins by connecting the left edge to the right edge.
+ *
+ * The game identifies players as player 1 and player 2. However in the UI
+ * player 1 uses gold and black and player 2 uses black and silver. This
+ * allows colourblind players to differentiate them, improving accessibility.
+ *
+ * Because Hex can never end in a draw, a game ends exactly when one player
+ * completes a connecting path.
+ *
+ * The game structure is built in two parts:
+ * - Game progression functions act on a {@link Hex.Game} state and know
+ *   about turns and the swap rule.
+ * - Board analysis functions act on a {@link Hex.Board} and know only about
+ *   board geometry and connection.
  * @namespace Hex
- * @author [Your Name]
- * @version 2024/25
+ * @author Freddie Pointon
+ * @version 2026
  */
 const Hex = Object.create(null);
 
@@ -20,32 +32,44 @@ const Hex = Object.create(null);
 // ---------------------------------------------------------------------------
 
 /**
- * A Board is a square 2-D grid of cells.
- * It is represented as an array of rows, where each row is an array of cells.
- * `board[row][col]` gives the cell at that position.
- * Row 0 is the top edge; row (size-1) is the bottom edge.
- * Col 0 is the left edge; col (size-1) is the right edge.
- * @memberof Hex
- * @typedef {Hex.Cell[][]} Board
- */
-
-/**
- * A Cell holds either a player's token or is empty.
- * @memberof Hex
- * @typedef {(Hex.Player | 0)} Cell
- */
-
-/**
- * A Player is either 1 (Red, connects top–bottom)
- * or 2 (Blue, connects left–right).
+ * A Player is one of the two competitors.
+ * Player 1 connects the top edge to the bottom edge; Player 2 connects the
+ * left edge to the right edge.
  * @memberof Hex
  * @typedef {(1 | 2)} Player
  */
 
 /**
- * A Position is a [row, col] coordinate pair on the board.
+ * A Cell is a single position on the board. It is empty (0) or holds the
+ * stone of a player.
+ * @memberof Hex
+ * @typedef {(Hex.Player | 0)} Cell
+ */
+
+/**
+ * A Board is a square grid of cells, represented as an array of rows.
+ * `board[row][col]` is the cell at that position.
+ * Row 0 is the top edge and row (size - 1) is the bottom edge.
+ * Column 0 is the left edge and column (size - 1) is the right edge.
+ * @memberof Hex
+ * @typedef {Hex.Cell[][]} Board
+ */
+
+/**
+ * A Position is a [row, column] coordinate pair on the board.
  * @memberof Hex
  * @typedef {number[]} Position
+ */
+
+/**
+ * A Game is the full state needed to continue play: the board, and how many
+ * moves have been made. The move count is what determines whose turn it is,
+ * which keeps the turn correct even after a swap (see {@link Hex.swap}).
+ * @memberof Hex
+ * @typedef {object} Game
+ * @property {Hex.Board} board The current board.
+ * @property {Hex.Player} first_player The player who made the opening move.
+ * @property {number} moves_played How many moves have been made so far.
  */
 
 // ---------------------------------------------------------------------------
@@ -53,25 +77,20 @@ const Hex = Object.create(null);
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a new empty board.
- * Every cell is initialised to 0 (empty).
+ * Creates a new empty board of the given size.
+ * Every cell starts empty (0).
  * @memberof Hex
  * @function
  * @param {number} [size=11] The width and height of the board.
- * @returns {Hex.Board} A new empty board ready to start a game.
+ * @returns {Hex.Board} A new empty board.
  */
 Hex.empty_board = function (size = 11) {
-    // R.repeat(value, n) produces an array of n copies of value.
-    // We repeat an empty row (itself an array of 0s) `size` times.
-    // R.map(R.identity) forces a deep copy so each row is independent.
-    return R.map(
-        R.always(R.repeat(0, size)),
-        R.range(0, size)
-    );
+    const empty_row = R.repeat(0, size);
+    return R.repeat(empty_row, size);
 };
 
 /**
- * Returns the size (width and height) of the board.
+ * Returns the size (width and height) of a board.
  * @memberof Hex
  * @function
  * @param {Hex.Board} board The board to measure.
@@ -82,208 +101,270 @@ Hex.size = function (board) {
 };
 
 // ---------------------------------------------------------------------------
-// Game state queries
+// Game creation and turn order
 // ---------------------------------------------------------------------------
 
 /**
- * Returns which player should make the next move.
- * Player 1 always goes first.
- * The player to move is determined by counting tokens:
- * if counts are equal it is Player 1's turn, otherwise Player 2's.
+ * Starts a new game: an empty board with no moves played yet. The starting
+ * player can be chosen so the caller may, for example, randomise it.
  * @memberof Hex
  * @function
- * @param {Hex.Board} board The current board.
- * @returns {Hex.Player} The player whose turn it is.
+ * @param {number} [size=11] The board size to play on.
+ * @param {Hex.Player} [first_player=1] The player who moves first.
+ * @returns {Hex.Game} A fresh game ready for the first player to move.
  */
-Hex.player_to_move = function (board) {
-    // R.flatten collapses the 2-D board to a 1-D array of cells.
-    // R.count(R.equals(n), arr) counts occurrences of n.
-    const flat = R.flatten(board);
-    const count_1 = R.count(R.equals(1), flat);
-    const count_2 = R.count(R.equals(2), flat);
-    return (count_1 === count_2) ? 1 : 2;
+Hex.new_game = function (size = 11, first_player = 1) {
+    return {
+        "board": Hex.empty_board(size),
+        "first_player": first_player,
+        "moves_played": 0
+    };
 };
 
 /**
- * Returns whether a given cell position is within the board boundaries.
+ * Returns which player should make the next move.
+ * Players alternate strictly, so the turn follows from the number of moves
+ * already made: an even count is the first player's turn, an odd count the
+ * other player's. This holds even after a swap, because a swap is itself one
+ * move. An older state without a recorded first player is treated as Player 1
+ * first, preserving the original behaviour.
+ * @memberof Hex
+ * @function
+ * @param {Hex.Game} game The current game state.
+ * @returns {Hex.Player} The player whose turn it is.
+ */
+Hex.player_to_move = function (game) {
+    const first_player = (
+        game.first_player === undefined
+        ? 1
+        : game.first_player
+    );
+    const second_player = (
+        first_player === 1
+        ? 2
+        : 1
+    );
+    return (
+        game.moves_played % 2 === 0
+        ? first_player
+        : second_player
+    );
+};
+
+/**
+ * Returns whether the swap (pie) rule is available right now.
+ * The swap is offered to the second player to move, whoever did not open,
+ * and only as the second move of the game.
+ * @memberof Hex
+ * @function
+ * @param {Hex.Game} game The current game state.
+ * @returns {boolean} True if the second player may swap this turn.
+ */
+Hex.can_swap = function (game) {
+    return game.moves_played === 1;
+};
+
+// ---------------------------------------------------------------------------
+// Board geometry: bounds, emptiness, and neighbours
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns whether a position lies on a board of the given size.
  * @memberof Hex
  * @function
  * @param {number} size The size of the board.
- * @param {Hex.Position} position The [row, col] to check.
+ * @param {Hex.Position} position The [row, column] to check.
  * @returns {boolean} True if the position is on the board.
  */
-Hex.is_in_bounds = function (size, [row, col]) {
+Hex.is_on_board = function (size, [row, col]) {
     return row >= 0 && row < size && col >= 0 && col < size;
 };
 
 /**
- * Returns whether a specific cell on the board is empty.
+ * Returns whether a specific cell is empty.
  * @memberof Hex
  * @function
  * @param {Hex.Board} board The board to query.
- * @param {Hex.Position} position The [row, col] position to check.
- * @returns {boolean} True if the cell is empty (0).
+ * @param {Hex.Position} position The [row, column] to check.
+ * @returns {boolean} True if the cell holds no stone.
  */
 Hex.is_empty = function (board, [row, col]) {
     return board[row][col] === 0;
 };
 
-// ---------------------------------------------------------------------------
-// The six neighbours of a hex cell
-// ---------------------------------------------------------------------------
-
-// In a hex grid represented as a square array, each cell [r, c] has exactly
-// six neighbours. These offsets encode those six directions:
+// In a hex grid laid out as a square array, each cell has six neighbours.
+// These are the six coordinate offsets that reach them:
 //
-//   NW  NE
-//  W  [r,c]  E
-//   SW  SE
+//        N   NE
+//      W   *   E
+//        SW   S
 //
-// In offset coordinates the six neighbours are:
-const HEX_NEIGHBOURS = [
+const hex_directions = [
     [-1, 0],   // North
     [-1, 1],   // North-East
     [0, -1],   // West
-    [0,  1],   // East
+    [0, 1],    // East
     [1, -1],   // South-West
-    [1,  0]    // South
+    [1, 0]     // South
 ];
 
 /**
- * Returns all valid on-board neighbours of a cell.
+ * Returns a function that shifts an offset by a fixed starting position.
+ * @function
+ * @param {Hex.Position} position The position to shift from.
+ * @returns {function} A function mapping an offset to a new position.
+ */
+const shift_from = function (position) {
+    return function ([d_row, d_col]) {
+        return [position[0] + d_row, position[1] + d_col];
+    };
+};
+
+/**
+ * Returns all on-board neighbours of a cell.
+ * Built by composition: shift the six directions from the cell, then keep
+ * only the positions that land on the board.
  * @memberof Hex
  * @function
  * @param {number} size The size of the board.
- * @param {Hex.Position} position The [row, col] of the cell.
- * @returns {Hex.Position[]} An array of valid neighbouring positions.
+ * @param {Hex.Position} position The [row, column] of the cell.
+ * @returns {Hex.Position[]} The neighbouring positions that are on the board.
  */
-Hex.neighbours = function (size, [row, col]) {
-    return HEX_NEIGHBOURS
-        .map(([dr, dc]) => [row + dr, col + dc])
-        .filter((pos) => Hex.is_in_bounds(size, pos));
+Hex.neighbours = function (size, position) {
+    const stays_on_board = function (candidate) {
+        return Hex.is_on_board(size, candidate);
+    };
+    return R.pipe(
+        R.map(shift_from(position)),
+        R.filter(stays_on_board)
+    )(hex_directions);
 };
 
 // ---------------------------------------------------------------------------
-// Win detection — BFS flood fill
+// Win detection
+//
+// Player 1 needs a top-to-bottom path; Player 2 needs a left-to-right path.
+// Rather than write the search twice, we write it once for the top-to-bottom
+// case. For Player 2 we transpose the board (swapping rows and columns):
+// a left-to-right connection on the original board is a top-to-bottom
+// connection on the transposed board. Hex adjacency is preserved by
+// transposition, so the same neighbour rule still applies.
 // ---------------------------------------------------------------------------
 
-// The win condition requires a connected path of same-colour cells from one
-// edge to the opposite edge. We detect this using a Breadth-First Search
-// (BFS). We seed the queue with all cells on the "start" edge owned by the
-// player, then flood through connected same-colour neighbours. If we reach
-// any cell on the "end" edge, the player has won.
-
 /**
- * Returns the seed positions (start edge) for a player's win check.
- * Player 1 starts at row 0 (top).
- * Player 2 starts at col 0 (left).
+ * Encodes a position as a "row,col" string for use as a Set/Map key.
  * @function
- * @param {Hex.Player} player
- * @param {number} size
- * @returns {Hex.Position[]}
+ * @param {Hex.Position} position The position to encode.
+ * @returns {string} The string key.
  */
-const start_edge = function (player, size) {
-    return R.range(0, size).map(
-        (i) => (player === 1 ? [0, i] : [i, 0])
-    );
+const key_of = function ([row, col]) {
+    return `${row},${col}`;
 };
 
 /**
- * Returns whether a position is on the winning end edge for a player.
- * Player 1's end edge is row (size-1) (bottom).
- * Player 2's end edge is col (size-1) (right).
+ * Returns the top-edge cells owned by a player: the starting points for a
+ * top-to-bottom search.
  * @function
- * @param {Hex.Player} player
- * @param {number} size
- * @param {Hex.Position} position
- * @returns {boolean}
+ * @param {Hex.Player} player The player to seed for.
+ * @param {Hex.Board} board The board to read.
+ * @returns {Hex.Position[]} The owned cells on row 0.
  */
-const is_end_edge = function (player, size, [row, col]) {
-    return (player === 1)
-        ? row === size - 1
-        : col === size - 1;
+const top_edge_seeds = function (player, board) {
+    const size = board.length;
+    const is_owned_top = function (col) {
+        return board[0][col] === player;
+    };
+    const to_position = function (col) {
+        return [0, col];
+    };
+    return R.map(to_position, R.filter(is_owned_top, R.range(0, size)));
 };
 
 /**
- * BFS flood fill to check connectivity across the board for one player.
- * Returns true if the player has a winning connected path.
+ * Breadth-first search for a top-to-bottom path of one player's stones.
+ * Returns the path of positions from the top edge to the bottom edge, or
+ * the empty array if there is none.
+ *
+ * The queue, the visited set and the came-from map are local to this call.
+ * They are never exposed and the board is never changed, so the function is
+ * pure: the same board always yields the same path.
  * @function
- * @param {Hex.Player} player The player to check.
- * @param {Hex.Board} board The board to analyse.
- * @returns {boolean} Whether the player has a winning path.
+ * @param {Hex.Player} player The player whose stones form the path.
+ * @param {Hex.Board} board The board to search.
+ * @returns {Hex.Position[]} A connecting path, or [] if none exists.
  */
-const player_has_won = function (player, board) {
-    const size = Hex.size(board);
-
-    // Seeds: all cells on the start edge that belong to this player.
-    const seeds = start_edge(player, size).filter(
-        ([r, c]) => board[r][c] === player
-    );
-
-    // BFS using a queue and a visited Set.
-    // We encode positions as "row,col" strings for the Set (Sets use ===).
+const top_bottom_path = function (player, board) {
+    const size = board.length;
     const visited = new Set();
-    const queue = [...seeds];
+    const came_from = new Map();
+    const queue = top_edge_seeds(player, board);
+    queue.forEach(function (position) {
+        visited.add(key_of(position));
+    });
 
-    seeds.forEach(([r, c]) => visited.add(`${r},${c}`));
-
-    // Standard BFS loop: dequeue front, check goal, enqueue unvisited neighbours.
-    while (queue.length > 0) {
-        const [r, c] = queue.shift();
-
-        if (is_end_edge(player, size, [r, c])) {
-            return true;
-        }
-
-        Hex.neighbours(size, [r, c]).forEach(function ([nr, nc]) {
-            const key = `${nr},${nc}`;
-            if (!visited.has(key) && board[nr][nc] === player) {
-                visited.add(key);
-                queue.push([nr, nc]);
+    // Visits one cell: queue its owned, unvisited neighbours and record the
+    // step taken to reach each. Defined once here, above the search loop, so
+    // that no function is created inside the loop.
+    const visit = function (current) {
+        Hex.neighbours(size, current).forEach(function (next) {
+            const next_key = key_of(next);
+            const is_owned = board[next[0]][next[1]] === player;
+            if (is_owned && !visited.has(next_key)) {
+                visited.add(next_key);
+                came_from.set(next_key, current);
+                queue.push(next);
             }
         });
+    };
+
+    let reached;
+    while (queue.length > 0 && reached === undefined) {
+        const current = queue.shift();
+        if (current[0] === size - 1) {
+            reached = current;
+        } else {
+            visit(current);
+        }
     }
 
-    return false;
+    if (reached === undefined) {
+        return [];
+    }
+
+    // Walk the came-from links back from the bottom edge to a seed.
+    const path = [];
+    let step = reached;
+    while (step !== undefined) {
+        path.push(step);
+        step = came_from.get(key_of(step));
+    }
+    return R.reverse(path);
 };
 
 /**
- * Returns whether the board is in a winning state for a given player.
- * A player wins by having a connected chain of their tokens from their
- * start edge to their end edge.
+ * Returns whether the board is won for a given player.
+ * Player 1 is checked top-to-bottom; Player 2 is checked on the transposed
+ * board so the same search serves both.
  * @memberof Hex
  * @function
  * @param {Hex.Player} player The player to check.
  * @param {Hex.Board} board The board to evaluate.
- * @returns {boolean} True if the specified player has won.
+ * @returns {boolean} True if that player has a connecting path.
  */
 Hex.is_winning_for_player = function (player, board) {
-    return player_has_won(player, board);
-};
-
-/**
- * Returns whether the game has ended.
- * A Hex game ends only when one player has a winning path —
- * the board can never fill up without a winner (a known mathematical property
- * of the game). We check both players for robustness.
- * @memberof Hex
- * @function
- * @param {Hex.Board} board The board to check.
- * @returns {boolean} True if the game is over.
- */
-Hex.is_ended = function (board) {
     return (
-        Hex.is_winning_for_player(1, board) ||
-        Hex.is_winning_for_player(2, board)
+        player === 1
+        ? top_bottom_path(1, board).length > 0
+        : top_bottom_path(2, R.transpose(board)).length > 0
     );
 };
 
 /**
- * Returns the winning player if the game is over, otherwise returns 0.
+ * Returns the winning player, or 0 if neither player has won.
  * @memberof Hex
  * @function
  * @param {Hex.Board} board The board to check.
- * @returns {(Hex.Player | 0)} The winning player (1 or 2), or 0 if no winner.
+ * @returns {(Hex.Player | 0)} The winning player, or 0 for no winner yet.
  */
 Hex.winner = function (board) {
     if (Hex.is_winning_for_player(1, board)) {
@@ -295,68 +376,153 @@ Hex.winner = function (board) {
     return 0;
 };
 
+/**
+ * Returns whether the game has been won.
+ * Hex cannot end in a draw, so this is the same as "the game is over".
+ * @memberof Hex
+ * @function
+ * @param {Hex.Board} board The board to check.
+ * @returns {boolean} True if either player has won.
+ */
+Hex.is_won = function (board) {
+    return Hex.winner(board) !== 0;
+};
+
+/**
+ * Returns the connecting path of the winning player as an array of
+ * positions, or the empty array if the game is not yet won.
+ * Intended for the user interface to highlight the winning line.
+ * @memberof Hex
+ * @function
+ * @param {Hex.Board} board The board to analyse.
+ * @returns {Hex.Position[]} The winning path, or [].
+ */
+Hex.winning_path = function (board) {
+    const winning_player = Hex.winner(board);
+    if (winning_player === 1) {
+        return top_bottom_path(1, board);
+    }
+    if (winning_player === 2) {
+        // The path is found on the transposed board, so swap each
+        // [row, col] back to original-board coordinates.
+        const flip = function ([row, col]) {
+            return [col, row];
+        };
+        return R.map(flip, top_bottom_path(2, R.transpose(board)));
+    }
+    return [];
+};
+
 // ---------------------------------------------------------------------------
 // Making a move
 // ---------------------------------------------------------------------------
 
 /**
- * Places a token for the given player at the specified position.
- * Returns the new board if the move is legal, otherwise returns undefined.
- *
- * A move is legal when:
- * - The game has not already ended.
- * - It is that player's turn.
- * - The target cell is empty and within bounds.
+ * Places a player's stone at a position, returning the new game state.
+ * Returns undefined for an illegal move. A move is legal when the game is
+ * not already won, it is that player's turn, and the target cell is empty
+ * and on the board.
  * @memberof Hex
  * @function
- * @param {Hex.Player} player The player making the move.
- * @param {Hex.Position} position The [row, col] to place the token.
- * @param {Hex.Board} board The current board state.
- * @returns {(Hex.Board | undefined)} The new board after the move,
- *     or undefined if the move is illegal.
+ * @param {Hex.Player} player The player placing the stone.
+ * @param {Hex.Position} position The [row, column] to place at.
+ * @param {Hex.Game} game The current game state.
+ * @returns {(Hex.Game | undefined)} The new game state, or undefined if the
+ *     move is illegal.
  */
-Hex.place_token = function (player, [row, col], board) {
-    // Guard: game must not be over.
-    if (Hex.is_ended(board)) {
+Hex.place_stone = function (player, [row, col], game) {
+    const board = game.board;
+    if (Hex.is_won(board)) {
         return undefined;
     }
-    // Guard: must be this player's turn.
-    if (Hex.player_to_move(board) !== player) {
+    if (Hex.player_to_move(game) !== player) {
         return undefined;
     }
-    // Guard: cell must be in bounds and empty.
-    if (!Hex.is_in_bounds(Hex.size(board), [row, col])) {
+    if (!Hex.is_on_board(Hex.size(board), [row, col])) {
         return undefined;
     }
     if (!Hex.is_empty(board, [row, col])) {
         return undefined;
     }
-    // R.update(index, value, array) returns a new array with value at index.
-    // We update the cell within its row, then update that row within the board.
-    // Neither the original row nor the original board is mutated.
     const new_row = R.update(col, player, board[row]);
-    return R.update(row, new_row, board);
+    const new_board = R.update(row, new_row, board);
+    return {
+        "board": new_board,
+        "first_player": game.first_player,
+        "moves_played": game.moves_played + 1
+    };
+};
+
+/**
+ * Finds the single stone on a board that has had exactly one move played.
+ * @function
+ * @param {Hex.Board} board The board to scan.
+ * @returns {Hex.Position} The position of the only stone.
+ */
+const only_stone = function (board) {
+    const size = board.length;
+    const all_positions = R.chain(function (row) {
+        return R.map(function (col) {
+            return [row, col];
+        }, R.range(0, size));
+    }, R.range(0, size));
+    return all_positions.find(function ([row, col]) {
+        return board[row][col] !== 0;
+    });
+};
+
+/**
+ * Applies the swap (pie) rule: the second player takes over the opening
+ * stone instead of placing their own. The stone keeps its position but
+ * becomes the second player's, and the turn passes back to the first player.
+ *
+ * The swap is legal only as the second move of the game; otherwise this
+ * returns undefined. It exists to offset the first player's opening
+ * advantage, and works whichever player opened.
+ * @memberof Hex
+ * @function
+ * @param {Hex.Game} game The current game state.
+ * @returns {(Hex.Game | undefined)} The new game state, or undefined if a
+ *     swap is not allowed right now.
+ */
+Hex.swap = function (game) {
+    if (!Hex.can_swap(game)) {
+        return undefined;
+    }
+    const swapper = Hex.player_to_move(game);
+    const [row, col] = only_stone(game.board);
+    const new_row = R.update(col, swapper, game.board[row]);
+    const new_board = R.update(row, new_row, game.board);
+    return {
+        "board": new_board,
+        "first_player": game.first_player,
+        "moves_played": game.moves_played + 1
+    };
 };
 
 // ---------------------------------------------------------------------------
-// Utility
+// Debug helper
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a string representation of the board for console debugging.
- * Empty cells are ".", Player 1 cells are "R", Player 2 cells are "B".
+ * Returns a human-readable string of the board for console debugging.
+ * Empty cells show as ".", Player 1 as "1", Player 2 as "2". Each row is
+ * indented to suggest the rhombus shape.
  * @memberof Hex
  * @function
  * @param {Hex.Board} board The board to display.
- * @returns {string} A human-readable board string.
+ * @returns {string} A printable representation of the board.
  */
 Hex.to_string = function (board) {
-    const symbols = [".", "R", "B"];
-    return board.map(function (row, row_index) {
-        // Indent each row by its index to give the hex slant visually.
+    const symbols = [".", "1", "2"];
+    const row_to_string = function (row, row_index) {
         const indent = " ".repeat(row_index);
-        return indent + row.map((cell) => symbols[cell]).join(" ");
-    }).join("\n");
+        const cells = R.map(function (cell) {
+            return symbols[cell];
+        }, row);
+        return indent + cells.join(" ");
+    };
+    return board.map(row_to_string).join("\n");
 };
 
 export default Object.freeze(Hex);

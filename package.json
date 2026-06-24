@@ -1,0 +1,21 @@
+{
+    "name": "hex",
+    "type": "module",
+    "version": "1.0.0",
+    "description": "Hex — a turn-based connection game. Computing 2 submission.",
+    "main": "web-app/Hex.js",
+    "scripts": {
+        "test": "mocha",
+        "docs": "jsdoc -c jsdoc.json"
+    },
+    "devDependencies": {
+        "docdash": "^2.0.2",
+        "jsdoc": "^4.0.5",
+        "mocha": "^10.0.0"
+    },
+    "dependencies": {
+        "jsdom": "^29.1.1",
+        "playwright-core": "^1.61.0",
+        "ramda": "^0.30.1"
+    }
+}
