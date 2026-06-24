@@ -2,6 +2,25 @@
 # Computing 2 Coursework Submission.
 **CID**: 02561966
 
+
+
+
+## AI Use Declaration
+
+I used an AI assistant (Claude) during this project as a code reviewer and
+pair-programmer. Specifically, it helped me:
+
+- audit my code against the marking criteria and identify weaknesses;
+- improve my unit tests (e.g. asserting that a winning path is a genuinely
+  connected chain, not just the right length).
+- tidy documentation and comments (e.g. marking internal helpers `@private`,
+  correcting old colour references).
+- work through Git and tooling steps (repository structure, JSLint checks,
+  clean-clone verification).
+
+All code in this submission was verified, understood, and applied, by
+me.
+
 This is the submission template for your Computing 2 Applications coursework submission.
 
 ## Checklist
